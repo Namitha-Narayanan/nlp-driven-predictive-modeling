@@ -1,0 +1,451 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Predictive Modeling with Natural Language Descriptions</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!--
+    Frontend for the Stateless Prediction API
+    - Dark, minimal UI for loading development payloads, validating JSON,
+      sending POST /predict, and optionally comparing to y_true (RMSE).
+    - Assumes: backend API at http://127.0.0.1:5000
+               static server for this file at http://127.0.0.1:5173
+    - Run:
+        1) python main.py
+        2) cd static && python -m http.server 5173
+        3) open http://localhost:5173/frontend.html
+  -->
+
+  <style>
+    :root{
+      --bg:#0c1220; --bg-grad:#162445; --panel:#121c2c; --panel-2:#0f1828;
+      --text:#e7eefc; --muted:#93a4c0; --border:#1b2a42; --code:#0b1526;
+      --chip:#0f1b2d; --accent:#69f0d1; --btn:#2d5bff; --btn-hover:#234ae0; --danger:#ff6b6b; --ok:#22c55e;
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{
+      margin:0; padding:24px;
+      font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, "Noto Sans", "Liberation Sans", sans-serif;
+      color:var(--text);
+      background:
+        radial-gradient(900px 500px at 20% -10%, var(--bg-grad) 0%, transparent 60%),
+        radial-gradient(900px 500px at 100% 0%, rgba(45,91,255,.15) 0%, transparent 55%),
+        var(--bg);
+    }
+    a{color:var(--accent); text-decoration:none}
+    a:hover{text-decoration:underline}
+    .wrap{max-width:1200px; margin:0 auto}
+    header{
+      background:linear-gradient(180deg, rgba(255,255,255,.04), rgba(0,0,0,0));
+      border:1px solid var(--border); border-radius:16px; padding:18px 20px;
+      display:flex; align-items:center; justify-content:space-between;
+      box-shadow: 0 10px 40px rgba(0,0,0,.35);
+    }
+    .hgroup{display:flex; gap:12px; align-items:center}
+    .logo{width:36px; height:36px; border-radius:10px; background: linear-gradient(135deg, #2d5bff, #5ed2ff); display:grid; place-items:center; font-weight:900; color:#061024; box-shadow: 0 6px 30px rgba(46,127,255,.25);}
+    h1{font-size:1.2rem; margin:0}
+    .sub{color:var(--muted); font-size:.92rem}
+    .pill{display:inline-block; padding:8px 12px; border-radius:999px; border:1px solid var(--border); background:var(--chip); color:var(--text); font-weight:700; cursor:pointer}
+    .pill:hover{filter:brightness(1.05)}
+
+    .grid{display:grid; grid-template-columns: 1fr 1fr; gap:18px; margin-top:18px}
+    .card{
+      background:linear-gradient(180deg, var(--panel) 0%, var(--panel-2) 100%);
+      border:1px solid var(--border); border-radius:16px; padding:16px;
+      box-shadow: 0 12px 50px rgba(0,0,0,.35);
+    }
+    .card h3{margin:0 0 10px; font-size:1rem}
+    .muted{color:var(--muted)}
+    .tag{display:inline-block; padding:4px 10px; background:var(--chip); border:1px solid var(--border); border-radius:999px; font-size:.75rem; color:var(--muted)}
+
+    .controls{display:grid; grid-template-columns: 2fr auto auto auto; gap:10px; align-items:end}
+    select, textarea, input[type="text"]{
+      width:100%; background:var(--chip); color:var(--text);
+      border:1px solid var(--border); border-radius:12px; padding:10px; font-size:.95rem;
+    }
+    textarea{min-height:340px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace}
+
+    .btn{
+      appearance:none; border:none; background:var(--btn); color:white;
+      border-radius:12px; padding:11px 16px; font-weight:800; cursor:pointer;
+      transition: transform .06s ease, background .2s ease; box-shadow: 0 8px 26px rgba(45,91,255,.25);
+    }
+    .btn:hover{transform: translateY(-1px); background:var(--btn-hover)}
+    .btn.ghost{background:transparent; border:1px solid var(--border); color:var(--text); box-shadow:none}
+    .btn.ghost:hover{border-color:#2a3c5c}
+
+    .row{display:flex; gap:10px; align-items:center; flex-wrap:wrap}
+    .status{min-height:1.2rem}
+    .ok{color:var(--ok)} .err{color:var(--danger)}
+
+    pre{
+      margin:0; padding:14px; background:var(--code); border:1px solid var(--border);
+      border-radius:14px; white-space:pre-wrap; word-break:break-word; max-height:560px; overflow:auto; font-size:.95rem;
+    }
+    .small{font-size:.9rem}
+    @media (max-width: 980px){ .grid{grid-template-columns:1fr} }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div class="hgroup">
+        <div class="logo">D</div>
+        <div>
+          <h1>Natural Language → Predictions</h1>
+          <div class="sub">
+            API: <code id="apiBase">http://127.0.0.1:5000</code> · Static server: <code>http://127.0.0.1:5173</code>
+          </div>
+        </div>
+      </div>
+      <button id="btnHealth" class="pill">Check Health</button>
+    </header>
+
+    <div class="grid">
+      <!-- Left: Request -->
+      <div class="card">
+        <h3>Request Payload <span class="tag">JSON</span></h3>
+        <p class="muted small" style="margin:.25rem 0 .6rem">Pick a case, optionally edit the JSON (especially <code>t</code>), then Predict.</p>
+
+        <div class="controls">
+          <div>
+            <label for="caseSelect" class="muted">Development case</label>
+            <select id="caseSelect"><option value="">(loading cases...)</option></select>
+          </div>
+          <button id="btnLoad" class="btn ghost">Load</button>
+          <button id="btnRandom" class="btn ghost">Random</button>
+          <button id="btnAutofix" class="btn ghost" title="Set n/k/d based on shapes">Autofix n/k/d</button>
+        </div>
+
+        <textarea id="payload" style="margin-top:.75rem;"></textarea>
+
+        <div style="margin-top:.75rem;" class="row">
+          <button id="btnValidate" class="btn ghost">Validate</button>
+          <button id="btnPredict" class="btn">Predict</button>
+          <button id="btnEval" class="btn ghost">Predict + Compare y_true</button>
+          <button id="btnCopy" class="btn ghost">Copy JSON</button>
+          <span class="status muted" id="status" aria-live="polite"></span>
+        </div>
+      </div>
+
+      <!-- Right: Response -->
+      <div class="card">
+        <h3>Output</h3>
+        <p class="muted small" style="margin:.25rem 0 .6rem">Server response (success or error). When comparing, RMSE vs y_true is shown.</p>
+        <pre id="response">(Choose a case or paste a payload)</pre>
+        <div class="small muted" id="rmse"></div>
+      </div>
+    </div>
+  </div>
+
+
+<script>
+
+/*
+Frontend wiring (overview)
+
+Environment:
+- Backend (Flask) runs at http://127.0.0.1:5000
+  - GET /health   -> simple liveness check
+  - POST /predict -> accepts a single JSON payload and returns predictions
+- Static server (this page + JSON fixtures) runs on http://127.0.0.1:5173
+  - Served either from project root (/static/frontend.html) or from /static (frontend.html)
+- CORS is enabled in Flask so the browser can call the API across ports.
+
+Data sources:
+- development_payloads.json: keyed map of example requests (x_observed, y_observed, x_predict, t, n, k, d)
+- development_y_true.json: keyed map of y_true arrays for evaluation (optional)
+
+UI controls (buttons & actions):
+- Development case <select>:
+    Selects a case id (no side effects). Use "Load" to insert it into the request box.
+- Load:
+    Inserts the selected case JSON into the request text area. Does not send a request yet.
+- Random:
+    Picks a random case id and loads it into the request box.
+- Autofix n/k/d:
+    Recomputes n, k, d from the shapes in x_observed and x_predict, updates the JSON in-place.
+    Useful if JSON was edited and counts got out of sync.
+- Validate:
+    Runs client-side checks for required keys, array ranks, and n/k/d consistency.
+    Shows a human-readable error if something is off.
+- Predict:
+    Sends the current JSON to POST /predict (API_BASE + '/predict').
+    Displays the server response (success or error) verbatim.
+- Predict + Compare y_true:
+    Same as Predict, then looks up y_true for the current case
+    and prints RMSE if lengths match.
+- Copy JSON:
+    Copies the current request JSON to the clipboard for quick sharing.
+- Check Health:
+    Calls GET /health and shows a short status message.
+
+Networking:
+- fetchWithTimeout(...) wraps window.fetch with a 90s timeout (matches README constraint).
+- On non-2xx responses or timeouts, the UI shows a JSON error with "status":"error" to mirror the API contract.
+
+Design intent:
+- Keep the surface area small and predictable.
+- Encourage valid requests (Validate + Autofix) before the call.
+- Show exactly what the API returned (no client-side rewriting of 'predictions').
+*/
+
+(() => {
+  // ---- Config (two-server setup) ----
+  const API_BASE     = 'http://127.0.0.1:5000';
+  const PAYLOADS_URL = 'development_payloads.json';     // sibling of frontend.html
+  const YTRUE_URL    = 'development_y_true.json';       // sibling of frontend.html
+
+  // ---- Globals (single source of truth) ----
+  let DEV = {};              // { caseId: payloadObj }
+  let YTRUE = {};            // { caseId: [y_true...] }
+  let CASE_KEYS = [];        // ["train_01", ...]
+  let currentCase = null;
+
+  // ---- Helpers ----
+  const $ = (id) => document.getElementById(id);
+  const payloadEl  = $('payload');
+  const responseEl = $('response');
+  const statusEl   = $('status');
+  const rmseEl     = $('rmse');
+  const selCase    = $('caseSelect');
+  const btnLoad    = $('btnLoad');
+  const btnRandom  = $('btnRandom');
+  const btnPredict = $('btnPredict');
+  const btnEval    = $('btnEval');
+  const btnCopy    = $('btnCopy');
+  const btnHealth  = $('btnHealth');
+  const btnValidate= $('btnValidate');
+  const btnAutofix = $('btnAutofix');
+
+  const HEALTH = API_BASE + '/health';
+  const API    = API_BASE + '/predict';
+
+  function status(msg, cls = '') {
+    statusEl.textContent = msg;
+    statusEl.className = 'status ' + cls;
+  }
+  function setResponse(objOrText) {
+    if (typeof objOrText === 'string') {
+      responseEl.textContent = objOrText;
+    } else {
+      responseEl.textContent = JSON.stringify(objOrText, null, 2);
+    }
+  }
+  const isArray = Array.isArray;
+  const shape2D = (arr) => [arr?.length || 0, (arr && arr[0] && arr[0].length) || 0];
+  const fmt = (x) => JSON.stringify(x, null, 2);
+
+  function validatePayload(p) {
+    const need = ["x_observed","y_observed","x_predict","t","n","k","d"];
+    const missing = need.filter(k => !(k in p));
+    if (missing.length) return `Missing required fields: ${missing.join(", ")}`;
+
+    if (!isArray(p.x_observed) || !isArray(p.x_observed[0])) return "x_observed must be a 2D array";
+    if (!isArray(p.x_predict)  || !isArray(p.x_predict[0]))  return "x_predict must be a 2D array";
+    if (!isArray(p.y_observed)) return "y_observed must be a 1D array";
+    if (typeof p.t !== "string") return "t must be a string";
+    if (![p.n,p.k,p.d].every(Number.isFinite)) return "n, k, d must be numbers";
+
+    const [n,d] = shape2D(p.x_observed);
+    const [k,dd]= shape2D(p.x_predict);
+    if (d !== dd) return `x_observed d=${d} must equal x_predict d=${dd}`;
+    if (n !== p.n) return `n mismatch: n=${p.n} but x_observed has ${n} rows`;
+    if (k !== p.k) return `k mismatch: k=${p.k} but x_predict has ${k} rows`;
+    if (d !== p.d) return `d mismatch: d=${p.d} but feature dim is ${d}`;
+    if (p.y_observed.length !== n) return `y_observed length ${p.y_observed.length} must equal n (${n})`;
+
+    return null;
+  }
+
+  function autofixNKD(p) {
+    if (!p) return p;
+    if (isArray(p.x_observed) && isArray(p.x_observed[0])) {
+      const [n,d] = shape2D(p.x_observed);
+      p.n = n; p.d = d;
+    }
+    if (isArray(p.x_predict) && isArray(p.x_predict[0])) {
+      const [k,_] = shape2D(p.x_predict);
+      p.k = k;
+    }
+    return p;
+  }
+
+  function loadCase(key) {
+    if (!key || !DEV[key]) {
+      status('Unknown case id', 'err');
+      return;
+    }
+    currentCase = key;
+    // Deep copy to avoid mutating the DEV map if the user edits
+    const payloadCopy = JSON.parse(JSON.stringify(DEV[key]));
+    payloadEl.value = fmt(payloadCopy);
+    rmseEl.textContent = '';
+    setResponse('(Ready to predict)');
+    status(`Loaded ${key}`, 'ok');
+  }
+
+  function pickRandom() {
+    if (!CASE_KEYS.length) {
+      status('No cases loaded yet.', 'err');
+      return;
+    }
+    const key = CASE_KEYS[Math.floor(Math.random() * CASE_KEYS.length)];
+    selCase.value = key;
+    loadCase(key);
+  }
+
+  async function fetchWithTimeout(resource, options = {}) {
+    const { timeout = 90000 } = options; // 90s
+    const controller = new AbortController();
+    const id = setTimeout(() => controller.abort(), timeout);
+    try {
+      return await fetch(resource, { ...options, signal: controller.signal });
+    } finally {
+      clearTimeout(id);
+    }
+  }
+
+  async function health() {
+    try {
+      const r = await fetch(HEALTH, { cache: 'no-store' });
+      const j = await r.json();
+      if (r.ok && j?.status === 'ok') status('Health OK ✓', 'ok');
+      else status('Health check failed', 'err');
+    } catch {
+      status('Health error — is the API running on 5000?', 'err');
+    }
+  }
+
+  async function loadDev() {
+    try {
+      const [pRes, yRes] = await Promise.all([
+        fetch(`${PAYLOADS_URL}?v=1`, { cache: 'no-store' }),
+        fetch(`${YTRUE_URL}?v=1`,    { cache: 'no-store' })
+      ]);
+      DEV   = await pRes.json();
+      YTRUE = await yRes.json();
+
+      CASE_KEYS = Object.keys(DEV).sort();
+      selCase.innerHTML = CASE_KEYS.map(k => `<option value="${k}">${k}</option>`).join('');
+
+      status(`Loaded ${CASE_KEYS.length} cases ✓`, 'ok');
+
+      // Auto-load first case so that user sees something immediately
+      if (CASE_KEYS.length) {
+        selCase.value = CASE_KEYS[0];
+        loadCase(CASE_KEYS[0]);
+      }
+    } catch (e) {
+      console.error(e);
+      status('Could not load static JSON files. Make sure you opened /static/frontend.html and the JSONs are in the same folder.', 'err');
+    }
+  }
+
+  function computeRMSE(a, b) {
+    if (!a || !b || a.length !== b.length) return NaN;
+    let s = 0; for (let i = 0; i < a.length; i++) { const d = a[i] - b[i]; s += d * d; }
+    return Math.sqrt(s / a.length);
+  }
+
+  async function doPredict(compare) {
+    setResponse('');
+    rmseEl.textContent = '';
+    status('Sending...');
+
+    let p;
+    try { p = JSON.parse(payloadEl.value); }
+    catch { status('Invalid JSON in request box.', 'err'); return; }
+
+    const vErr = validatePayload(p);
+    if (vErr) { status(vErr, 'err'); return; }
+
+    try {
+      const res = await fetchWithTimeout(API, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(p),
+        timeout: 90000
+      });
+
+      const text = await res.text();
+      let body; try { body = JSON.parse(text); } catch { body = text; }
+
+      if (res.status === 408) {
+        setResponse({ status: 'error', message: body?.message || 'Request timeout' });
+        status('HTTP 408 Request Timeout', 'err');
+        return;
+      }
+
+      if (!res.ok) {
+        const msg = (body && typeof body === 'object' && body.message) ? body.message : (typeof body === 'string' ? body : 'Unknown error');
+        setResponse({ status: 'error', message: msg });
+        status(`HTTP ${res.status} Error`, 'err');
+        return;
+      }
+
+      setResponse(body);
+      status('Success ✓', 'ok');
+
+      if (compare) {
+        const key = currentCase;
+        const truth = key ? YTRUE[key] : null;
+        if (truth && Array.isArray(truth) && Array.isArray(body.predictions)) {
+          const r = computeRMSE(body.predictions, truth);
+          rmseEl.innerHTML = `RMSE vs y_true for <b>${key}</b>: <span style="color:#22c55e">${isFinite(r) ? r.toFixed(6) : 'n/a'}</span>`;
+        } else {
+          rmseEl.textContent = 'No y_true available for this case or length mismatch.';
+        }
+      }
+    } catch (err) {
+      if (err.name === 'AbortError') {
+        setResponse({ status: 'error', message: 'Request timeout' });
+        status('HTTP 408 Request Timeout', 'err');
+      } else {
+        setResponse(String(err));
+        status('Network error — is the API running on 5000?', 'err');
+      }
+    }
+  }
+
+  // ---- Wire up events AFTER DOM is ready ----
+  window.addEventListener('DOMContentLoaded', () => {
+    // Buttons
+    btnLoad.addEventListener('click', () => loadCase(selCase.value));
+    btnRandom.addEventListener('click', pickRandom);
+    btnCopy.addEventListener('click', async () => {
+      try { await navigator.clipboard.writeText(payloadEl.value); status('Copied JSON ✓', 'ok'); }
+      catch { status('Copy failed', 'err'); }
+    });
+    btnHealth.addEventListener('click', health);
+    btnAutofix.addEventListener('click', () => {
+      try {
+        const p = JSON.parse(payloadEl.value);
+        autofixNKD(p);
+        payloadEl.value = fmt(p);
+        status('n/k/d updated from shapes ✓', 'ok');
+      } catch { status('Invalid JSON; cannot autofix.', 'err'); }
+    });
+    btnValidate.addEventListener('click', () => {
+      try {
+        const p = JSON.parse(payloadEl.value);
+        const err = validatePayload(p);
+        if (err) status(err, 'err'); else status('Payload looks valid ✓', 'ok');
+      } catch { status('Invalid JSON in request box.', 'err'); }
+    });
+    btnPredict.addEventListener('click', () => doPredict(false));
+    btnEval.addEventListener('click',    () => doPredict(true));
+
+    // Dropdown change selects case but doesn't overwrite the edits unless user clicks Load
+    selCase.addEventListener('change', () => { currentCase = selCase.value; status(`Selected ${currentCase}. Click "Load" to paste it.`, 'muted'); });
+
+    // Kick off initial load
+    loadDev();
+  });
+})();
+</script>
+
+
+</body>
+</html>
