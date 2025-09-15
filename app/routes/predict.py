@@ -37,7 +37,7 @@ def predict():
 
     # if payload.get("force_fail") is True:
     #     # for screenshot only; normal failures are handled below with real message
-    #     return server_error("Linear regression failed")  # -> 500 exact text
+    #     return server_error("Linear regression failed")  # -> as per sample test load from readme.md file
     # # --------------------------------------------------------------------------------
 
     # -------- validation (400s) --------
