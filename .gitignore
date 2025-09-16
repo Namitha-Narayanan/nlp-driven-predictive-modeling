@@ -1,1 +1,23 @@
-/.venv
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# VS Code project settings
+.vscode/
+
+# macOS Finder junk
+.DS_Store
+
+# Logs / checkpoints
+*.log
+*.out
+*.err
+
